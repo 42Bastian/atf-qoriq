@@ -12,8 +12,22 @@
 
 #define SZ_16M_BYTES			0x1000000U
 
+
+
+/* Start of "if defined(CONFIG_MT25QU128A)" */
+#if defined(CONFIG_MT25QU128A)
+
+#define F_SECTOR_64K			0x10000U
+#define F_PAGE_256			0x100U
+#define F_SECTOR_4K			0x1000U
+#define F_FLASH_SIZE_BYTES		0x1000000U
+#define F_SECTOR_ERASE_SZ		F_SECTOR_64K
+#ifdef CONFIG_FSPI_4K_ERASE
+#define F_SECTOR_ERASE_SZ		F_SECTOR_4K
+#endif
+
 /* Start of "if defined(CONFIG_MT25QU512A)" */
-#if defined(CONFIG_MT25QU512A)
+#elif defined(CONFIG_MT25QU512A)
 #define F_SECTOR_64K			0x10000U
 #define F_PAGE_256			0x100U
 #define F_SECTOR_4K			0x1000U

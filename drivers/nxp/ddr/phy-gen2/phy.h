@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: BSD-3-Clause
  */
 
-#if !defined(PHY_H) && defined(NXP_WARM_BOOT)
+#if !defined(PHY_H) && (defined(NXP_WARM_BOOT) || defined(FLEXSPI_NOR_BOOT))
 #define PHY_H
 
 #include <flash_info.h>
@@ -72,6 +72,7 @@ int restore_phy_training_values(uint16_t **phy_ptr, uint32_t address_to_restore,
  */
 
 struct phy_training_values training_1D_values[] = {
+	{KEY_1D_TRAINING, 0},
 	{0x200B2, 0},	{0x200CB, 0},	{0x10043, 0},	{0x11043, 0},
 	{0x12043, 0},	{0x13043, 0},	{0x14043, 0},	{0x15043, 0},
 	{0x16043, 0},	{0x17043, 0},	{0x18043, 0},	{0x10143, 0},
@@ -302,6 +303,7 @@ struct phy_training_values training_1D_values[] = {
  *Array to store the PHY 2D Training register addresses
  */
 struct phy_training_values training_2D_values[] = {
+	{KEY_2D_TRAINING, 0},
 	{0x1008C, 0},   {0x1108C, 0},   {0x1208C, 0},   {0x1308C, 0},
 	{0x1408C, 0},   {0x1508C, 0},   {0x1608C, 0},   {0x1708C, 0},
 	{0x1808C, 0},   {0x1018C, 0},   {0x1118C, 0},   {0x1218C, 0},

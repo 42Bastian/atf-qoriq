@@ -38,10 +38,20 @@ static void cal_csn_config(int i,
 	const unsigned int ap_n_en = popts->cs_odt[i].auto_precharge;
 	const unsigned int odt_rd_cfg = popts->cs_odt[i].odt_rd_cfg;
 	const unsigned int odt_wr_cfg = popts->cs_odt[i].odt_wr_cfg;
+#ifdef CONFIG_TARGET_MPXLX2160
+	const struct dimm_params *sodimm = pdimm + 1;	// sodimm structure is next after dimm
+	// for different DIMM/SODIMM settings
+	const unsigned int ba_bits_cs_n = (i < 2) ? pdimm->bank_addr_bits : sodimm->bank_addr_bits;
+	const unsigned int col_bits_cs_n = (i < 2) ? pdimm->n_col_addr - 8 : sodimm->n_col_addr - 8;
+	const unsigned int row_bits_cs_n = (i < 2) ? pdimm->n_row_addr - 12 : sodimm->n_row_addr - 12;
+	const unsigned int bg_bits_cs_n = (i < 2) ? pdimm->bank_group_bits : sodimm->bank_group_bits;
+	INFO("cs[%d] bits: col %d row %d ba %d bg %d\n", i, col_bits_cs_n + 8, row_bits_cs_n + 12, ba_bits_cs_n, bg_bits_cs_n);
+#else
 	const unsigned int ba_bits_cs_n = pdimm->bank_addr_bits;
-	const unsigned int row_bits_cs_n = pdimm->n_row_addr - 12U;
-	const unsigned int col_bits_cs_n = pdimm->n_col_addr - 8U;
+	const unsigned int col_bits_cs_n = pdimm->n_col_addr - 8;
+	const unsigned int row_bits_cs_n = pdimm->n_row_addr - 12;
 	const unsigned int bg_bits_cs_n = pdimm->bank_group_bits;
+#endif
 
 	if (i == 0) {
 		/* These fields only available in CS0_CONFIG */
@@ -66,8 +76,7 @@ static void cal_csn_config(int i,
 			    ((row_bits_cs_n & 0x7) << 8)	|
 			    ((bg_bits_cs_n & 0x3) << 4)		|
 			    ((col_bits_cs_n & 0x7) << 0);
-	debug("cs%d\n", i);
-	debug("   _config = 0x%x\n", regs->cs[i].config);
+	debug("cs[%d].config = 0x%x\n", i, regs->cs[i].config);
 }
 
 static inline int avoid_odt_overlap(const struct ddr_conf *conf,
@@ -121,10 +130,11 @@ static void cal_timing_cfg(const unsigned long clk,
 	const int acttopre_mclk = picos_to_mclk(clk, pdimm->tras_ps);
 	const int acttorw_mclk = picos_to_mclk(clk, pdimm->trcd_ps);
 	const int caslat_ctrl = (cas_latency - 1) << 1;
-	const int trfc1_min = pdimm->die_density >= 0x3 ? 16000 :
-			      (pdimm->die_density == 0x4 ? 26000 :
-			       (pdimm->die_density == 0x5 ? 35000 :
-				55000));
+	const int trfc1_min = pdimm->die_density <= 0x3 ? 160000 :	// corrected >= 3 to <= 3 and the time by factor 10
+			      (pdimm->die_density == 0x4 ? 260000 :
+			       (pdimm->die_density == 0x5 ? 350000 :
+			       (pdimm->die_density == 0x6 ? 350000 :	// 0x6 is 350nsec
+				550000)));
 	const int refrec_ctrl = picos_to_mclk(clk,
 							pdimm->trfc1_ps) - 8;
 	int wrrec_mclk = picos_to_mclk(clk, pdimm->twr_ps);
@@ -201,7 +211,8 @@ static void cal_timing_cfg(const unsigned long clk,
 				picos_to_mclk(clk, pdimm->trfc_slr_ps) : 0;
 	const unsigned int acttoact_cid_mclk = pdimm->package_3ds ? 4U : 0;
 
-
+	debug("cas_latency %d wr_lat %d rwt_bg %d wrt_bg %d\n",
+	      cas_latency,wr_lat,rwt_bg,wrt_bg);
 	/* for two dual-rank DIMMs to avoid ODT overlap */
 	if (avoid_odt_overlap(conf, pdimm) == 2) {
 		twrt_mclk = 2;
@@ -303,6 +314,8 @@ static void cal_timing_cfg(const unsigned long clk,
 		rodt_on = cas_latency - wr_lat + 1;
 	}
 
+	debug("rodt_on %d\n",rodt_on);
+
 	regs->timing_cfg[5] = (((rodt_on & 0x1f) << 24)			|
 			     ((rodt_off & 0x7) << 20)			|
 			     ((wodt_on & 0x1f) << 12)			|
@@ -338,6 +351,9 @@ static void cal_timing_cfg(const unsigned long clk,
 	} else {
 		wrt_bg = 0;
 	}
+
+	debug("tccdl %d rwt_bg %d wrt_bg %d rrt_bg %d wwt_bg %d\n",
+	      tccdl,rwt_bg,wrt_bg,rrt_bg,wwt_bg);
 	regs->timing_cfg[8] = (((rwt_bg & 0xf) << 28)			|
 			     ((wrt_bg & 0xf) << 24)			|
 			     ((rrt_bg & 0xf) << 20)			|
@@ -443,8 +459,10 @@ static void cal_ddr_sdram_cfg(const unsigned long clk,
 	const unsigned int rcw_en = popts->rdimm;
 	const unsigned int md_en = popts->mirrored_dimm;
 	const unsigned int qd_en = popts->quad_rank_present;
-	const unsigned int unq_mrs_en = ip_rev < 0x50500U ? 1U : 0U;
+	const unsigned int unq_mrs_en = ip_rev < 0x50500 ? 1 : 0;	// change < 0x50500 to <= 0x50500 for LX2160 if needed
+#ifndef CONFIG_TARGET_MPXLX2160
 	const unsigned int rd_pre = popts->quad_rank_present;
+#endif
 	int i;
 
 	regs->sdram_cfg[0] = ((mem_en & 0x1) << 31)		|
@@ -492,8 +510,14 @@ static void cal_ddr_sdram_cfg(const unsigned long clk,
 		);
 	debug("sdram_cfg[1] = 0x%x\n", regs->sdram_cfg[1]);
 
+#ifdef CONFIG_TARGET_MPXLX2160
+	regs->sdram_cfg[2] = (1 << 16);	// RD_PRE
+//	regs->sdram_cfg[2] = (3 << 12) | (1 << 16);	// No DM, RD_PRE
+#else
 	regs->sdram_cfg[2] = (rd_pre & 0x1) << 16	|
 				 (popts->rdimm ? 1 : 0);
+#endif
+
 	if (pdimm->package_3ds != 0) {
 		if (((pdimm->package_3ds + 1) & 0x1) != 0) {
 			WARN("Unsupported 3DS DIMM\n");
@@ -563,7 +587,7 @@ static void cal_ddr_sdram_mode(const unsigned long clk,
 		14, 9, 15, 10, 12, 11, 16, 17,
 		18, 19, 20, 21, 22, 23
 	};
-	const unsigned int unq_mrs_en = ip_rev < U(0x50500) ? 1U : 0U;
+	const unsigned int unq_mrs_en = ip_rev < 0x50500 ? 1 : 0;	// change < 0x50500 to <= 0x50500 for LX2160 if needed
 	unsigned short esdmode2 = 0U;
 	unsigned short esdmode3 = 0U;
 	const unsigned int wr_crc = 0U;
@@ -583,6 +607,14 @@ static void cal_ddr_sdram_mode(const unsigned long clk,
 	const unsigned int tccdl_min = max(5U,
 					   picos_to_mclk(clk, pdimm->tccdl_ps));
 
+	// RD_PRE and WR_PRE in conjunction with sdram_cfg[2] setting
+	if (regs->sdram_cfg[2] & (1 << 16)) {
+		esdmode4 |= 1 << 11;
+	}
+	if (regs->sdram_cfg[2] & (1 << 17)) {
+		esdmode4 |= 1 << 12;
+	}
+
 	if (popts->rtt_override != 0U) {
 		rtt = popts->rtt_override_value;
 	} else {
@@ -597,7 +629,7 @@ static void cal_ddr_sdram_mode(const unsigned long clk,
 	}
 
 	if (popts->quad_rank_present != 0 || popts->output_driver_impedance != 0) {
-		dic = 1;	/* output driver impedance 240/7 ohm */
+		dic = 1;	/* output driver impedance 240/7 (34) -> 240/5 (48) ohm */
 	}
 
 	esdmode = (((qoff & 0x1) << 12)				|
@@ -621,7 +653,8 @@ static void cal_ddr_sdram_mode(const unsigned long clk,
 		WARN("Error: unsupported cas latency for mode register\n");
 	}
 
-	sdmode = (((caslat & 0x10) << 8)			|
+	sdmode = (((caslat & 0x10) << (12-4))			|
+		  ((wr & 0x8) << (13-3))			|
 		  ((wr & 0x7) << 9)				|
 		  ((dll_rst & 0x1) << 8)			|
 		  ((mode & 0x1) << 7)				|
@@ -668,7 +701,12 @@ static void cal_ddr_sdram_mode(const unsigned long clk,
 		   ((rtt_wr & 0x7) << 9)			|
 		   ((srt & 0x3) << 6)				|
 		   ((cwl & 0x7) << 3);
-	esdmode3 = ((mpr & 0x3) << 11) | ((wc_lat & 0x3) << 9);
+
+	esdmode3 = ((mpr & 0x3) << 11) | ((wc_lat & 0x3) << 9);	// Refresh Mode 8:6
+	if (popts->caslat_override && !(popts->caslat_override_value & 1) && !popts->twot_en) {
+		debug("Gear-Down-Mode\n");
+		esdmode3 |= 1 << 3;	// Gear-Down-Mode
+	}
 
 	regs->sdram_mode[1] = ((esdmode2 & 0xFFFF) << 16)	|
 				((esdmode3 & 0xFFFF) << 0);
@@ -676,10 +714,13 @@ static void cal_ddr_sdram_mode(const unsigned long clk,
 
 	esdmode6 = ((tccdl_min - 4) & 0x7) << 10;
 	if (popts->vref_dimm != 0) {
-		esdmode6 |= popts->vref_dimm & 0x7f;
+		esdmode6 |= popts->vref_dimm & 0x7f;	// Bits 5:0 = 0x3f. + RANGE2 in Bit 6 = 0x40
 	} else if ((popts->ddr_cdr2 & DDR_CDR2_VREF_RANGE_2) != 0) {
 		esdmode6 |= 1 << 6;	/* Range 2 */
 	}
+	esdmode6 |= 1 << 7; // Vref Calibration Enable
+
+	regs->cdr[1] = esdmode6 & (DDR_CDR2_VREF_TRAIN_EN | DDR_CDR2_VREF_RANGE_2);
 
 	regs->sdram_mode[9] = ((esdmode6 & 0xffff) << 16)	|
 				 ((esdmode7 & 0xffff) << 0);
@@ -891,11 +932,8 @@ static void cal_ddr_csn_bnds(struct ddr_cfg_regs *regs,
 	unsigned long long ea, sa;
 
 	/* Chip Select Memory Bounds (CSn_BNDS) */
-	for (i = 0;
-		i < DDRC_NUM_CS && conf->cs_size[i];
-		i++) {
-		debug("cs_in_use = 0x%x\n", conf->cs_in_use);
-		if (conf->cs_in_use != 0) {
+	for (i = 0; i < DDRC_NUM_CS; i++) {
+		if (conf->cs_size[i] && (conf->cs_in_use & (1 << i))) {
 			sa = conf->cs_base_addr[i];
 			ea = sa + conf->cs_size[i] - 1;
 			sa >>= 24;
@@ -907,8 +945,7 @@ static void cal_ddr_csn_bnds(struct ddr_cfg_regs *regs,
 			/* setting bnds to 0xffffffff for inactive CS */
 			regs->cs[i].bnds = 0xffffffff;
 		}
-
-		debug("cs[%d].bnds = 0x%x\n", i, regs->cs[i].bnds);
+		debug("cs[%d].bnds   = 0x%08x\n", i, regs->cs[i].bnds);
 	}
 }
 
@@ -950,6 +987,7 @@ static void cal_ddr_addr_dec(struct ddr_cfg_regs *regs)
 	ba_intlv = (regs->sdram_cfg[0] >> 8) & 0x7f;
 	switch (ba_intlv) {
 	case DDR_BA_INTLV_CS01:
+	case DDR_BA_INTLV_CS01_23:
 		cs = 1;
 		break;
 	case DDR_BA_INTLV_CS0123:
@@ -962,8 +1000,8 @@ static void cal_ddr_addr_dec(struct ddr_cfg_regs *regs)
 		ERROR("%s ba_intlv 0x%x\n", __func__, ba_intlv);
 		return;
 	}
-	debug("col %d, row %d, ba %d, bg %d, intlv %d\n",
-			col_bits, row_bits, ba_bits, bg_bits, intlv);
+	debug("col %d, row %d, ba %d, bg %d, intlv %d, ba_intlv $%x\n",
+			col_bits, row_bits, ba_bits, bg_bits, intlv, ba_intlv);
 	/*
 	 * Example mapping of 15x2x2x10
 	 * ---- --rr rrrr rrrr rrrr rCBB Gccc cccI cGcc cbbb
@@ -1358,6 +1396,7 @@ int compute_ddrc(const unsigned long clk,
 		cas_latency++;
 	}
 
+	INFO("cas_latency %d\n",cas_latency);
 	if (i <= 0) {
 		ERROR("Failed to find a proper cas latency\n");
 		return -EINVAL;

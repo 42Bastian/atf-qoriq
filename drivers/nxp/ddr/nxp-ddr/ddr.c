@@ -131,7 +131,7 @@ static const struct dynamic_odt dual_S0[4] = {
 	{},
 	{}
 };
-#else
+#else /* !NXP_DDR_PHY_GEN2 */
 static const struct dynamic_odt single_D[4] = {
 	{	/* cs0 */
 		DDR_ODT_NEVER,
@@ -715,27 +715,81 @@ static unsigned long long assign_non_intlv_addr(
 	int i;
 	const unsigned long long rank_density = pdimm->rank_density >>
 						opt->dbw_cap_shift;
+
+#ifdef CONFIG_TARGET_MPXLX2160
+	int multiply = 1;
+	const struct dimm_params *sodimm = pdimm + 1;
+	const unsigned long long sorank_density = sodimm->rank_density >>
+						opt->dbw_cap_shift;
+	uint64_t so_sz;
+	uint64_t sz;
+#endif
+
 	unsigned long long total_ctlr_mem = 0ULL;
 
 	debug("rank density 0x%llx\n", rank_density);
 	conf->base_addr = current_mem_base;
 
+#ifdef CONFIG_TARGET_MPXLX2160
+
+	if (opt->ctlr_intlv_mode == DDR_256B_INTLV) {
+		multiply = 2;
+	}
+
+	sz = rank_density * multiply;
+	so_sz = sorank_density * multiply;
+#endif
+
 	/* assign each cs */
 	switch (opt->ba_intlv & DDR_BA_INTLV_CS0123) {
 	case DDR_BA_INTLV_CS0123:
+#ifdef CONFIG_TARGET_MPXLX2160
+		if (rank_density != sorank_density) {
+			NOTICE("!!! DDR_BA_INTLV_CS0123: DIMM rank_density %llu != SODIMM rank_density %llu.\n",
+					rank_density,sorank_density);
+		}
+#endif
 		for (i = 0; i < DDRC_NUM_CS; i++) {
+#ifdef CONFIG_TARGET_MPXLX2160
+			if (conf->cs_in_use & (1 << i)) {
+				conf->cs_base_addr[i] = current_mem_base;
+				conf->cs_size[i] = sz * 4;
+				total_ctlr_mem += sz;
+			}
+#else
 			conf->cs_base_addr[i] = current_mem_base;
 			conf->cs_size[i] = rank_density << 2;
 			total_ctlr_mem += rank_density;
+#endif
 		}
 		break;
 	case DDR_BA_INTLV_CS01:
+#ifdef CONFIG_TARGET_MPXLX2160
+		for (i = 0; i < 2; i++) {
+			if (conf->cs_in_use & (1 << i)) {
+				conf->cs_base_addr[i] = current_mem_base;
+				conf->cs_size[i] = sz * 2;
+				total_ctlr_mem += sz;
+			}
+		}
+#else
 		for (i = 0; ((conf->cs_in_use & (1 << i)) != 0) && i < 2; i++) {
 			conf->cs_base_addr[i] = current_mem_base;
 			conf->cs_size[i] = rank_density << 1;
 			total_ctlr_mem += rank_density;
 		}
+#endif
 		current_mem_base += total_ctlr_mem;
+#ifdef CONFIG_TARGET_MPXLX2160
+		for (; i < DDRC_NUM_CS; i++) {
+			if (conf->cs_in_use & (1 << i)) {
+				conf->cs_base_addr[i] = current_mem_base;
+				conf->cs_size[i] = so_sz;
+				current_mem_base += so_sz;
+				total_ctlr_mem += so_sz;
+			}
+		}
+#else
 		for (; ((conf->cs_in_use & (1 << i)) != 0) && i < DDRC_NUM_CS;
 		     i++) {
 			conf->cs_base_addr[i] = current_mem_base;
@@ -743,8 +797,45 @@ static unsigned long long assign_non_intlv_addr(
 			total_ctlr_mem += rank_density;
 			current_mem_base += rank_density;
 		}
+#endif
 		break;
+#ifdef CONFIG_TARGET_MPXLX2160
+	case DDR_BA_INTLV_CS01_23:
+		for (i = 0; i < 2; i++) {
+			if (conf->cs_in_use & (1 << i)) {
+				conf->cs_base_addr[i] = current_mem_base;
+				conf->cs_size[i] = sz * 2;
+				total_ctlr_mem += sz;
+			}
+		}
+		current_mem_base += total_ctlr_mem;
+		for (; i < DDRC_NUM_CS; i++) {
+			if (conf->cs_in_use & (1 << i)) {
+				conf->cs_base_addr[i] = current_mem_base;
+				conf->cs_size[i] = so_sz * 2;
+				total_ctlr_mem += so_sz;
+			}
+		}
+		break;
+#endif
+
 	case DDR_BA_NONE:
+#ifdef CONFIG_TARGET_MPXLX2160
+		for (i = 0; i < DDRC_NUM_CS; i++) {
+			if (conf->cs_in_use & (1 << i)) {
+				conf->cs_base_addr[i] = current_mem_base;
+				if (i >= 2) {	// SODIMM on cs 2 and 3
+					conf->cs_size[i] = so_sz;
+					current_mem_base += so_sz;
+					total_ctlr_mem += so_sz;
+				} else {
+					conf->cs_size[i] = sz;
+					current_mem_base += sz;
+					total_ctlr_mem += sz;
+				}
+			}
+		}
+#else
 		for (i = 0; ((conf->cs_in_use & (1 << i)) != 0) &&
 			     (i < DDRC_NUM_CS); i++) {
 			conf->cs_base_addr[i] = current_mem_base;
@@ -752,6 +843,7 @@ static unsigned long long assign_non_intlv_addr(
 			current_mem_base += rank_density;
 			total_ctlr_mem += rank_density;
 		}
+#endif
 		break;
 	default:
 		ERROR("Unsupported bank interleaving\n");

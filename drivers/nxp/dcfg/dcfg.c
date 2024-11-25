@@ -84,6 +84,13 @@ const devdisr5_info_t *get_devdisr5_info(void)
 	return (const devdisr5_info_t *) &devdisr5_info;
 }
 
+#ifdef NXP_DDR_PHY_GEN2
+#define RCWSR0_MEM_PLL_CFG_SHIFT	8
+#define RCWSR0_MEM_PLL_CFG_MASK		0x03
+#define RCWSR0_MEM2_PLL_CFG_SHIFT	16
+#define RCWSR0_MEM2_PLL_CFG_MASK	0x03
+#endif
+
 int get_clocks(struct sysinfo *sys)
 {
 	unsigned int *rcwsr0 = NULL;
@@ -107,6 +114,19 @@ int get_clocks(struct sysinfo *sys)
 	sys->freq_ddr_pll1 *= (gur_in32(rcwsr0) >>
 				RCWSR0_MEM2_PLL_RAT_SHIFT) &
 				RCWSR0_MEM2_PLL_RAT_MASK;
+
+#ifdef NXP_DDR_PHY_GEN2
+	// LX2160
+	sys->freq_ddr_pll0 *= 4;
+	sys->freq_ddr_pll1 *= 4;
+	sys->freq_ddr_pll0 /= ((gur_in32(rcwsr0) >>
+				RCWSR0_MEM_PLL_CFG_SHIFT) &
+				RCWSR0_MEM_PLL_CFG_MASK) + 1;
+	sys->freq_ddr_pll1 /= ((gur_in32(rcwsr0) >>
+				RCWSR0_MEM2_PLL_CFG_SHIFT) &
+				RCWSR0_MEM2_PLL_CFG_MASK) + 1;
+#endif
+
 	if (sys->freq_platform == 0) {
 		return 1;
 	} else {

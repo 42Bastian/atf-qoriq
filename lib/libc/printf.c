@@ -158,23 +158,28 @@ loop:
 				count += unsigned_num_print(unum, 10,
 							    padc, padn);
 				break;
-			case '0':
-				padc = '0';
-				padn = 0;
-				fmt++;
-
-				for (;;) {
-					char ch = *fmt;
-					if ((ch < '0') || (ch > '9')) {
-						goto loop;
-					}
-					padn = (padn * 10) + (ch - '0');
-					fmt++;
-				}
-				assert(0); /* Unreachable */
 			default:
-				/* Exit on any other format specifier */
-				return -1;
+				if ((*fmt >= '0') && (*fmt <= '9')) {
+					if (*fmt == '0')
+						padc = '0';
+					else
+						padc = ' ';
+					padn = 0;
+
+					for (;;) {
+						char ch = *fmt;
+						if ((ch < '0') || (ch > '9')) {
+							goto loop;
+						}
+						padn = (padn * 10) + (ch - '0');
+						fmt++;
+					}
+					assert(0); /* Unreachable */
+				} else {
+					/* Exit on any other format specifier */
+					return -1;
+				}
+				break;
 			}
 			fmt++;
 			continue;

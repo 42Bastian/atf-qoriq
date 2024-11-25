@@ -35,10 +35,7 @@
 	register unsigned char *buf = (void *)(spd);	\
 							\
 	for (i = 0; i < (len); i++) {			\
-		print_uint(i);				\
-		puts("\t: 0x");				\
-		print_hex(buf[i]);			\
-		puts("\n");				\
+		printf("%d:\t0x%02x\n",i,buf[i]);	\
 	}						\
 }
 #else

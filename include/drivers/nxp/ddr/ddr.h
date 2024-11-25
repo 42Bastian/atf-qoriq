@@ -8,6 +8,10 @@
 #ifndef DDR_H
 #define DDR_H
 
+#if defined(LOG_LEVEL) && (LOG_LEVEL >= 40)
+#define DDR_DEBUG
+#endif
+
 #include "ddr_io.h"
 #include "dimm.h"
 #include "immap.h"
@@ -91,6 +95,9 @@ struct ddr_info {
 	unsigned int num_ctlrs;
 	unsigned int dimm_on_ctlr;
 	struct dimm_params dimm;
+#ifdef CONFIG_TARGET_MPXLX2160
+	struct dimm_params sodimm;
+#endif
 	struct memctl_opt opt;
 	struct ddr_conf conf;
 	struct ddr_cfg_regs ddr_reg;

@@ -48,6 +48,11 @@
 #include "platform_def.h"
 #include "soc.h"
 
+#ifdef CONFIG_TARGET_MPXLX2160
+#undef NXP_I2C_ADDR
+#define NXP_I2C_ADDR 0x02050000		// For CRX08 I2C6
+#endif
+
 static struct soc_type soc_list[] =  {
 	/* SoC LX2160A */
 	SOC_ENTRY(LX2160A, LX2160A, 8, 2),
@@ -383,6 +388,7 @@ void soc_mem_access(void)
 			break;
 		}
 
+		NOTICE("DRAM %d: %llx / %llx\n",dram_idx,info_dram_regions->region[dram_idx].addr,info_dram_regions->region[dram_idx].size);
 		index = populate_tzc400_reg_list(tzc400_reg_list,
 				dram_idx, index,
 				info_dram_regions->region[dram_idx].addr,

@@ -267,7 +267,9 @@ $(eval OBJ := $(1)/$(patsubst %.c,%.o,$(notdir $(2))))
 $(eval DEP := $(patsubst %.o,%.d,$(OBJ)))
 
 $(OBJ): $(2) $(filter-out %.d,$(MAKEFILE_LIST)) | lib$(3)_dirs
-	$$(ECHO) "  CC      $$<"
+	$$(ECHO) "  C1C      $$<"
+#	$$(ECHO) "   TF_CFLAGS $$(TF_CFLAGS)"
+#	$$(ECHO) "   CFLAGS $$(CFLAGS)"
 	$$(Q)$$(CC) $$(TF_CFLAGS) $$(CFLAGS) $(MAKE_DEP) -c $$< -o $$@
 
 -include $(DEP)
@@ -303,7 +305,12 @@ $(eval BL_CPPFLAGS := $($(call uppercase,$(3))_CPPFLAGS) -DIMAGE_$(call uppercas
 $(eval BL_CFLAGS := $($(call uppercase,$(3))_CFLAGS))
 
 $(OBJ): $(2) $(filter-out %.d,$(MAKEFILE_LIST)) | $(3)_dirs
-	$$(ECHO) "  CC      $$<"
+	$$(ECHO) "  C2C      $$<"
+#	$$(ECHO) "   LTO_CFLAGS $$(LTO_CFLAGS)"
+#	$$(ECHO) "   TF_CFLAGS $$(TF_CFLAGS)"
+#	$$(ECHO) "   CFLAGS $$(CFLAGS)"
+#	$$(ECHO) "   BL_CPPFLAGS $(BL_CPPFLAGS)"
+#	$$(ECHO) "   BL_CFLAGS $(BL_CFLAGS)"
 	$$(Q)$$(CC) $$(LTO_CFLAGS) $$(TF_CFLAGS) $$(CFLAGS) $(BL_CPPFLAGS) $(BL_CFLAGS) $(MAKE_DEP) -c $$< -o $$@
 
 -include $(DEP)

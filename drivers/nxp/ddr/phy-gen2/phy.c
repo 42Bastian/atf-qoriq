@@ -15,7 +15,7 @@
 #include <ddr.h>
 #include "ddr4fw.h"
 #include <drivers/delay_timer.h>
-#ifdef NXP_WARM_BOOT
+#if defined(NXP_WARM_BOOT) || defined(FLEXSPI_NOR_BOOT)
 #include <fspi_api.h>
 #endif
 #include "input.h"
@@ -112,11 +112,17 @@ static uint32_t findrank(uint32_t cs_in_use)
 
 	switch (cs_in_use) {
 	case U(0xf):
-		val = 4U;
+#ifdef CONFIG_TARGET_MPXLX2160
+		val = 2;	// MPXLX2160 has 2 + 2 with all CS
+#else
+		val = 4;
+#endif
 		break;
 	case U(0x3):
 		val = 2U;
 		break;
+	case 0x5:
+	case 0xa:
 	case U(0x1):
 		val = 1U;
 		break;
@@ -872,7 +878,7 @@ static int phy_gen2_msg_init(void *msg_1d,
 	}
 	msg_blk->phy_config_override	= 0U;
 #ifdef DDR_PHY_DEBUG
-	msg_blk->hdt_ctrl		= U(0x5);
+	msg_blk->hdt_ctrl		= 0x00; // 0x5 for less Debug messages from 1D Training
 #else
 	msg_blk->hdt_ctrl		= U(0xc9);
 #endif
@@ -882,9 +888,15 @@ static int phy_gen2_msg_init(void *msg_1d,
 	msg_blk->cs_present		= input->cs_d0 | input->cs_d1;
 	msg_blk->cs_present_d0		= input->cs_d0;
 	msg_blk->cs_present_d1		= input->cs_d1;
+
+#ifdef CONFIG_TARGET_MPXLX2160
+	msg_blk->addr_mirror		= input->mirror;	/* CS3 on SODIMM(CS1) is mirrored */
+#else
 	if (input->mirror != 0) {
 		msg_blk->addr_mirror	= U(0x0a);	/* odd CS are mirrored */
 	}
+#endif
+
 	msg_blk->share2dvref_result	= 1U;
 
 	msg_blk->acsm_odt_ctrl0		= input->odt[0];
@@ -926,6 +938,12 @@ static int phy_gen2_msg_init(void *msg_1d,
 					  4U;
 	msg_blk->bpznres_val		= input->adv.ext_cal_res_val;
 	msg_blk->disabled_dbyte		= 0U;
+
+	// KeiT: Set odt and phy impedance for training
+	msg_blk->phy_odt_impedance = input->adv.odtimpedance;
+	msg_blk->phy_drv_impedance = input->adv.tx_impedance;
+
+	msg_blk->phy_cfg = (msg_blk->mr3 & 0x8) ? 0 : input->adv.is2ttiming;
 
 	debug("msg_blk->dram_type = 0x%x\n", msg_blk->dram_type);
 	debug("msg_blk->sequence_ctrl = 0x%x\n", msg_blk->sequence_ctrl);
@@ -1000,10 +1018,16 @@ static int phy_gen2_msg_init(void *msg_1d,
 	if (input->basic.train2d != 0) {
 		memcpy(msg_blk_2d, msg_blk, sizeof(struct ddr4u1d));
 		/*High-Effort WrDQ1D is applicable to 2D traning also*/
+		msg_blk_2d->hdt_ctrl		= 0x5; // 0x5 to disable 2D messages
 		msg_blk_2d->reserved00          |= U(0x40);
 		msg_blk_2d->sequence_ctrl	= U(0x0061);
+#ifdef CONFIG_TARGET_MPXLX2160
+		msg_blk_2d->rx2d_train_opt	= 0;	// 1 for intensive training. Needs 7 seconds longer!
+		msg_blk_2d->tx2d_train_opt	= 0;	// see comment before
+#else
 		msg_blk_2d->rx2d_train_opt	= 0U;
 		msg_blk_2d->tx2d_train_opt	= 0U;
+#endif
 		msg_blk_2d->share2dvref_result	= 1U;
 		msg_blk_2d->delay_weight2d	= U(0x20);
 		msg_blk_2d->voltage_weight2d	= U(0x80);
@@ -2478,6 +2502,133 @@ static void print_jason_format(struct input *input,
 }
 #endif
 
+#ifdef FLEXSPI_NOR_BOOT
+/* Loading of 1D and 2D Training values only for XSPI Boot */
+int restore_phy_training_values_crx08(uint16_t **phy_ptr, uint32_t address_to_restore,
+		uint32_t num_of_phy, int train2d)
+{
+	uint16_t *phy = NULL;
+	int16_t readback;
+	uint32_t size = 1, num_of_regs = 1, phy_store = 0, crc;
+	int i = 0, j = 0, ret = -EINVAL;
+
+	for (j = 0; j < num_of_phy; j++) {
+		phy = phy_ptr[j];
+		size = sizeof(training_1D_values);
+		num_of_regs = ARRAY_SIZE(training_1D_values);
+		if (train2d) {
+		/* The address to restore training values is
+		 * to be appended for next PHY
+		 */
+			phy_store = address_to_restore + (j *
+					(sizeof(training_1D_values) +
+					 sizeof(training_2D_values)));
+		} else {
+			phy_store = address_to_restore + (j *
+					(sizeof(training_1D_values)));
+		}
+		/* Enable access to the internal CSRs */
+		phy_io_write16(phy, t_apbonly |
+				csr_micro_cont_mux_sel_addr, 0x0);
+		/* Enable clocks in case they were disabled. */
+		phy_io_write16(phy, t_drtub |
+				csr_ucclk_hclk_enables_addr, 0x3);
+
+		/* Reading 1D training values from flash*/
+		ret = xspi_read(phy_store, (uint32_t *)training_1D_values, size);
+		if (!ret && (training_1D_values[0].addr == KEY_1D_TRAINING)) {
+			crc = 0;
+			/* Simple CRC by XOR .addr and .data */
+			for (i = 1; i < num_of_regs; i++) {
+				crc ^= training_1D_values[i].addr;
+				crc ^= training_1D_values[i].data;
+			}
+			crc &= 0xffff;
+			if (crc == training_1D_values[0].data) {
+				printf("PHY %d: 1D @ %08x\n", j, phy_store);
+				ret = 0;
+				for (i = 1; i < num_of_regs; i++) {
+					phy_io_write16(phy, training_1D_values[i].addr,
+							training_1D_values[i].data);
+					debug("%d. Reg: %x, value: %x PHY: %p\n", i,
+							training_1D_values[i].addr,
+							training_1D_values[i].data,
+							phy_io_addr(phy,
+								training_1D_values[i].addr));
+					readback = phy_io_read16(phy, training_1D_values[i].addr);
+					if (readback != training_1D_values[i].data)
+						ret = -EINVAL;
+				}
+			} else {
+				printf("1D Training Data Loaded CRC $%08x vs. Calculated CRC $%08x\n",
+				  training_1D_values[0].data, crc);
+				ret = -EINVAL;
+			}
+		} else {
+			printf("No stored 1D Training Data\n");
+			ret = -EINVAL;
+		}
+
+		if (!ret && train2d) {
+			phy_store = phy_store + size;
+			size = sizeof(training_2D_values);
+			num_of_regs = ARRAY_SIZE(training_2D_values);
+			/* Reading 2D training values from flash */
+			ret = xspi_read(phy_store, (uint32_t *)training_2D_values, size);
+			if (!ret && (training_2D_values[0].addr == KEY_2D_TRAINING)) {
+				crc = 0;
+				/* Simple CRC by XOR .addr and .data */
+				for (i = 1; i < num_of_regs; i++) {
+					crc ^= training_2D_values[i].addr;
+					crc ^= training_2D_values[i].data;
+				}
+				crc &= 0xffff;
+				if (crc == training_2D_values[0].data) {
+					printf("PHY %d: 2D @ %08x\n", j, phy_store);
+					ret = 0;
+					for (i = 1; i < num_of_regs; i++) {
+						phy_io_write16(phy, training_2D_values[i].addr,
+								training_2D_values[i].data);
+						debug("%d. Reg: %x, value: %x PHY: %p\n", i,
+								training_2D_values[i].addr,
+								training_2D_values[i].data,
+								phy_io_addr(phy,
+								training_2D_values[i].addr));
+						readback = phy_io_read16(phy, training_2D_values[i].addr);
+						if (readback != training_2D_values[i].data)
+							ret = -EINVAL;
+					}
+				} else {
+					printf("2D Training Data Loaded CRC $%08x vs. Calculated CRC $%08x\n",
+					  training_2D_values[0].data, crc);
+					ret = -EINVAL;
+				}
+			} else {
+				printf("No stored 2D Training Data\n");
+				ret = -EINVAL;
+			}
+		}
+#if 0
+		/* Disable clocks in case they were disabled. */
+		phy_io_write16(phy, t_drtub |
+				csr_ucclk_hclk_enables_addr, 0x0);
+		/* Disable access to the internal CSRs */
+		phy_io_write16(phy, t_apbonly |
+				csr_micro_cont_mux_sel_addr, 0x1);
+#endif
+	}
+	return ret;
+}
+
+#else
+int restore_phy_training_values_crx08(uint16_t **phy_ptr, uint32_t address_to_restore,
+		uint32_t num_of_phy, int train2d)
+{
+    /* Load only for FLEX_NOR_BOOT */
+    return -EINVAL;
+}
+#endif
+
 int compute_ddr_phy(struct ddr_info *priv)
 {
 	const unsigned long clk = priv->clk;
@@ -2485,7 +2636,7 @@ int compute_ddr_phy(struct ddr_info *priv)
 	const struct ddr_conf *conf = &priv->conf;
 	const struct dimm_params *dimm_param = &priv->dimm;
 	struct ddr_cfg_regs *regs = &priv->ddr_reg;
-	int ret;
+	int ret, load_ret;
 	static struct input input;
 	static struct ddr4u1d msg_1d;
 	static struct ddr4u2d msg_2d;
@@ -2527,7 +2678,12 @@ int compute_ddr_phy(struct ddr_info *priv)
 #if DDRC_NUM_DIMM > 1
 	input.cs_d1 = conf->cs_on_dimm[1];
 #endif
+#ifdef CONFIG_TARGET_MPXLX2160
+	input.mirror = dimm_param->mirrored_dimm ? 0x04 : 0x00;		/* Soldered DIMM */
+	input.mirror |= priv->sodimm.mirrored_dimm ? 0x08 : 0x00;	/* SODIMM */
+#else
 	input.mirror = dimm_param->mirrored_dimm;
+#endif
 	input.mr[0] = regs->sdram_mode[0] & U(0xffff);
 	input.mr[1] = regs->sdram_mode[0] >> 16U;
 	input.mr[2] = regs->sdram_mode[1] >> 16U;
@@ -2581,6 +2737,8 @@ int compute_ddr_phy(struct ddr_info *priv)
 	debug("Initializing input adv data structure\n");
 	phy_gen2_init_input(&input);
 
+	input.adv.is2ttiming = popts->twot_en;
+
 	debug("Initializing message block\n");
 	ret = phy_gen2_msg_init(&msg_1d, &msg_2d, &input);
 	if (ret != 0) {
@@ -2588,12 +2746,36 @@ int compute_ddr_phy(struct ddr_info *priv)
 		return ret;
 	}
 
+#ifdef CONFIG_TARGET_MPXLX2160
+	msg_1d.x16present = 0;
+	msg_2d.x16present = 0;
+	if (priv->dimm.device_width == 16) {
+		msg_1d.x16present |= input.cs_d0;	/* Soldered DIMM is x16 (fix) (KeiT) */
+		msg_2d.x16present |= input.cs_d0;	/* Soldered DIMM is x16 (fix) (KeiT) */
+	}
+	if (priv->sodimm.device_width == 16) {
+		msg_1d.x16present |= input.cs_d1;	/* SODIMM is x16 (typical x8) (KeiT) */
+		msg_2d.x16present |= input.cs_d1;	/* SODIMM is x16 (typical x8) (KeiT) */
+	}
+	debug("MPXLX2160 modified msg_blk->x16present = 0x%x\n", msg_1d.x16present);
+#endif
+
 	ret = c_init_phy_config(priv->phy, priv->ip_rev, &input, &msg_1d);
 	if (ret != 0) {
 		ERROR("Init PHY failed (error code %d)\n", ret);
 		return ret;
 	}
+
+    /* get phy fw version */
+    phy_io_write16(priv->phy[0], t_apbonly | csr_micro_cont_mux_sel_addr, 0);
+
+    INFO("DDR PMU Hardware version-0x%x\n",
+            phy_io_read16(priv->phy[0], t_drtub | csr_pubrev));
+
+    phy_io_write16(priv->phy[0], t_apbonly | csr_micro_cont_mux_sel_addr, 1);
+
 #ifdef NXP_WARM_BOOT
+#error "Not supported for CRX08"
 	debug("Warm boot flag value %0x\n", priv->warm_boot_flag);
 	if (priv->warm_boot_flag == DDR_WARM_BOOT) {
 		debug("Restoring the Phy training data\n");
@@ -2626,6 +2808,15 @@ int compute_ddr_phy(struct ddr_info *priv)
 			return ret;
 		}
 
+		/* Special for CRX08 */
+		/* Try loading 1D and 2D Training data from Flash */
+		/* PHY_TRAINING_REGS_ON_FLASH = 0x100000 - 0x20000 (see platform.mk) */
+		load_ret = restore_phy_training_values_crx08(priv->phy,
+					  PHY_TRAINING_REGS_ON_FLASH,
+					  priv->num_ctlrs,
+					  input.basic.train2d);
+
+		/* Must run 1D Training every time, even we successfully loaded the data */
 		debug("Load 1D firmware\n");
 		ret = load_fw(priv->phy, &input, 0, &msg_1d,
 			      sizeof(struct ddr4u1d), priv->phy_gen2_fw_img_buf,
@@ -2635,10 +2826,10 @@ int compute_ddr_phy(struct ddr_info *priv)
 			return ret;
 		}
 
-		debug("Execute firmware\n");
+		debug("Execute 1D firmware\n");
 		ret = g_exec_fw(priv->phy, 0, &input);
 		if (ret != 0) {
-			ERROR("Execution FW failed (error code %d)\n", ret);
+			ERROR("Execution 1D FW failed (error code %d)\n", ret);
 		}
 
 #ifdef NXP_APPLY_MAX_CDD
@@ -2654,7 +2845,11 @@ int compute_ddr_phy(struct ddr_info *priv)
 		}
 #endif
 
-		if ((ret == 0) && (input.basic.train2d != 0)) {
+		if (load_ret && (ret == 0) && (input.basic.train2d != 0)) {
+			/* If 1D and 2D Training values are loaded, we can skip 2D Training
+			 * Otherwise execute the 2D Training now
+			 */
+
 			/* 2D training starts here */
 			debug("Load 2D firmware\n");
 			ret = load_fw(priv->phy, &input, 1, &msg_2d,

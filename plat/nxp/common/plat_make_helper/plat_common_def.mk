@@ -41,7 +41,9 @@ endif
 
 ifeq (${CONFIG_DDR_NODIMM},1)
 $(eval $(call add_define,CONFIG_DDR_NODIMM))
+ifeq (${DDRC_NUM_DIMM},0)
 DDRC_NUM_DIMM := 1
+endif
 endif
 
 ifneq (${DDRC_NUM_DIMM},)

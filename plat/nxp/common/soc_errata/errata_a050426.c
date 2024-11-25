@@ -73,7 +73,10 @@ void erratum_a050426(void)
 		mmio_write_32(0x706718000 + (i * 4), 0x55555555);
 		mmio_write_32(0x706718800 + (i * 4), 0x55555555);
 	}
-	mmio_write_32(0x706b0a000, 0x55555555);
+
+	for (i = 0; i < 2; i++) {
+		mmio_write_32(0x706b0a000 + (i * 4), 0x55555555);
+	}
 
 	for (i = 0U; i < 4U; i++) {
 		mmio_write_32(0x706b0e000 + (i * 4), 0x55555555);
@@ -89,7 +92,9 @@ void erratum_a050426(void)
 		mmio_write_32(0x706b15000 + (i * 4), 0x55555555);
 		mmio_write_32(0x706b15800 + (i * 4), 0x55555555);
 	}
-	mmio_write_32(0x706e12000, 0x55555555);
+	for (i = 0; i < 4; i++) {
+		mmio_write_32(0x706e12000 + (i * 4), 0x55555555);
+	}
 
 	for (i = 0U; i < 4U; i++) {
 		mmio_write_32(0x706e14000 + (i * 4), 0x55555555);
