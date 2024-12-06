@@ -30,9 +30,6 @@
 #include <plat/common/platform.h>
 #include <tools_share/uuid.h>
 
-#define TSPD_ROUTE_IRQ_TO_EL3 1
-#define TSPD_ROUTE_FIQ_TO_EL3 1
-
 static int s_idle = 0;
 static int ns_idle = 1;
 
@@ -48,7 +45,6 @@ tsp_vectors_t *tsp_vectors;
  * Array to keep track of per-cpu Secure Payload state
  ******************************************************************************/
 tsp_context_t tspd_sp_context[TSPD_CORE_COUNT];
-
 
 /* TSP UID */
 DEFINE_SVC_UUID2(tsp_uuid,
@@ -98,7 +94,6 @@ static uint64_t tspd_sel1_interrupt_handler(uint32_t id,
   return switch_to_secure();
 }
 
-#if TSP_NS_INTR_ASYNC_PREEMPT
 /*******************************************************************************
  * This function is the handler registered for Non secure interrupts by the
  * TSPD. It validates the interrupt and upon success arranges entry into the
@@ -114,13 +109,11 @@ static uint64_t tspd_ns_interrupt_handler(uint32_t id,
   if (get_interrupt_src_ss(flags) == SECURE) {
     cm_el1_sysregs_context_save(SECURE);
     ns_idle = 0;
-
   } else {
     panic();
   }
   return switch_to_nonsecure();
 }
-#endif
 
 /*******************************************************************************
  * Secure Payload Dispatcher setup. The SPD finds out the SP entrypoint and type
@@ -165,15 +158,9 @@ static int32_t tspd_setup(void)
                          tsp_ep_info->pc,
                          &tspd_sp_context[linear_id]);
 
-#if TSP_INIT_ASYNC
+
   bl31_set_next_image_type(SECURE);
-#else
-  /*
-   * All TSPD initialization done. Now register our init function with
-   * BL31 for deferred invocation
-   */
-  bl31_register_bl32_init(&tspd_init);
-#endif
+
   return 0;
 }
 
@@ -232,14 +219,11 @@ static uintptr_t tspd_smc_handler(uint32_t smc_fid,
                                   void *handle,
                                   u_register_t flags)
 {
-  cpu_context_t *ns_cpu_context;
-  uint32_t linear_id = plat_my_core_pos(), ns;
-  tsp_context_t *tsp_ctx = &tspd_sp_context[linear_id];
+  uint32_t ns;
+//->  uint32_t linear_id = plat_my_core_pos();
+//->  tsp_context_t *tsp_ctx = &tspd_sp_context[linear_id];
   uint64_t rc;
-#if TSP_INIT_ASYNC
   entry_point_info_t *next_image_info;
-#endif
-//->        tf_log(LOG_MARKER_ERROR "x1 %ld\n",x1);
 
   /* Determine which security state this SMC originated from */
   ns = is_caller_non_secure(flags);
@@ -247,8 +231,9 @@ static uintptr_t tspd_smc_handler(uint32_t smc_fid,
   switch (smc_fid) {
 
   case TSP_S_IDLE:
-    if (ns)
-      SMC_RET1(handle, SMC_UNK);
+    if (ns){
+      panic();
+    }
 
     cm_el1_sysregs_context_save(SECURE);
     s_idle = 1;
@@ -261,8 +246,9 @@ static uintptr_t tspd_smc_handler(uint32_t smc_fid,
 
 
   case TSP_NS_IDLE:
-    if (!ns)
-      SMC_RET1(handle, SMC_UNK);
+    if (!ns){
+      panic();
+    }
 
     cm_el1_sysregs_context_save(NON_SECURE);
     ns_idle = 1;
@@ -296,80 +282,60 @@ static uintptr_t tspd_smc_handler(uint32_t smc_fid,
      * finished initialising itself after a cold boot
      */
   case TSP_ENTRY_DONE:
-    if (ns)
-      SMC_RET1(handle, SMC_UNK);
-
-    /*
-     * Stash the SP entry points information. This is done
-     * only once on the primary cpu
-     */
-    assert(tsp_vectors == NULL);
-    tsp_vectors = (tsp_vectors_t *) x1;
-
-    if (tsp_vectors) {
-      set_tsp_pstate(tsp_ctx->state, TSP_PSTATE_ON);
-
-      /*
-       * TSP has been successfully initialized. Register power
-       * management hooks with PSCI
-       */
-      psci_register_spd_pm_hook(&tspd_pm);
-
-
-      cm_el1_sysregs_context_save(SECURE);
-      /*
-       * Register an interrupt handler for S-EL1 interrupts
-       * when generated during code executing in the
-       * non-secure state.
-       */
-      flags = 0;
-      set_interrupt_rm_flag(flags, NON_SECURE);
-      rc = register_interrupt_type_handler(INTR_TYPE_S_EL1,
-                                           tspd_sel1_interrupt_handler,
-                                           flags);
-      if (rc)
-        panic();
-
-      /*
-       * Register an interrupt handler for NS interrupts when
-       * generated during code executing in secure state are
-       * routed to EL3.
-       */
-      flags = 0;
-      set_interrupt_rm_flag(flags, SECURE);
-
-      rc = register_interrupt_type_handler(INTR_TYPE_NS,
-                                           tspd_ns_interrupt_handler,
-                                           flags);
-      if (rc)
-        panic();
+    if (ns){
+      panic();
     }
 
-#if TSP_INIT_ASYNC
+    /*
+     * TSP has been successfully initialized. Register power
+     * management hooks with PSCI
+     */
+    psci_register_spd_pm_hook(&tspd_pm);
+
+    cm_el1_sysregs_context_save(SECURE);
+
+    /*
+     * Register an interrupt handler for S-EL1 interrupts
+     * when generated during code executing in the
+     * non-secure state.
+     */
+    flags = 0;
+    set_interrupt_rm_flag(flags, NON_SECURE);
+    rc = register_interrupt_type_handler(INTR_TYPE_S_EL1,
+                                         tspd_sel1_interrupt_handler,
+                                         flags);
+    if (rc){
+      panic();
+    }
+
+    /*
+     * Register an interrupt handler for NS interrupts when
+     * generated during code executing in secure state are
+     * routed to EL3.
+     */
+    flags = 0;
+    set_interrupt_rm_flag(flags, SECURE);
+
+    rc = register_interrupt_type_handler(INTR_TYPE_NS,
+                                         tspd_ns_interrupt_handler,
+                                         flags);
+    if (rc){
+      panic();
+    }
+
     s_idle = 1;
     ns_idle = 0;
     /* Save the Secure EL1 system register context */
     cm_el1_sysregs_context_save(SECURE);
 
+    NOTICE("S-EL1 init, starting BL33\n");
     /* Program EL3 registers to enable entry into the next EL */
     next_image_info = bl31_plat_get_next_image_ep_info(NON_SECURE);
-    assert(next_image_info);
-    assert(NON_SECURE ==
-           GET_SECURITY_STATE(next_image_info->h.attr));
-
     cm_init_my_context(next_image_info);
     cm_prepare_el3_exit(NON_SECURE);
+
     SMC_RET0(cm_get_context(NON_SECURE));
-#else
-    /*
-     * SP reports completion. The SPD must have initiated
-     * the original request through a synchronous entry
-     * into the SP. Jump back to the original C runtime
-     * context.
-     */
-    tspd_synchronous_sp_exit(tsp_ctx, x1);
-    break;
-#endif
+
     /*
      * This function ID is used only by the SP to indicate it has finished
      * aborting a preempted Yielding SMC Call.
@@ -399,8 +365,9 @@ static uintptr_t tspd_smc_handler(uint32_t smc_fid,
   case TSP_SUSPEND_DONE:
   case TSP_SYSTEM_OFF_DONE:
   case TSP_SYSTEM_RESET_DONE:
-    if (ns)
-      SMC_RET1(handle, SMC_UNK);
+    if (ns){
+      panic();
+    }
 
     /*
      * SP reports completion. The SPD must have initiated the
@@ -408,221 +375,14 @@ static uintptr_t tspd_smc_handler(uint32_t smc_fid,
      * Jump back to the original C runtime context, and pass x1 as
      * return value to the caller
      */
-    tspd_synchronous_sp_exit(tsp_ctx, x1);
+//->    tspd_synchronous_sp_exit(tsp_ctx, x1);
     break;
 
-    /*
-     * Request from non-secure client to perform an
-     * arithmetic operation or response from secure
-     * payload to an earlier request.
-     */
-  case TSP_FAST_FID(TSP_ADD):
-  case TSP_FAST_FID(TSP_SUB):
-  case TSP_FAST_FID(TSP_MUL):
-  case TSP_FAST_FID(TSP_DIV):
-
-  case TSP_YIELD_FID(TSP_ADD):
-  case TSP_YIELD_FID(TSP_SUB):
-  case TSP_YIELD_FID(TSP_MUL):
-  case TSP_YIELD_FID(TSP_DIV):
-    if (ns) {
-      /*
-       * This is a fresh request from the non-secure client.
-       * The parameters are in x1 and x2. Figure out which
-       * registers need to be preserved, save the non-secure
-       * state and send the request to the secure payload.
-       */
-      assert(handle == cm_get_context(NON_SECURE));
-
-      /* Check if we are already preempted */
-      if (get_yield_smc_active_flag(tsp_ctx->state))
-        SMC_RET1(handle, SMC_UNK);
-
-      cm_el1_sysregs_context_save(NON_SECURE);
-
-      /* Save x1 and x2 for use by TSP_GET_ARGS call below */
-      store_tsp_args(tsp_ctx, x1, x2);
-
-      /*
-       * We are done stashing the non-secure context. Ask the
-       * secure payload to do the work now.
-       */
-
-      /*
-       * Verify if there is a valid context to use, copy the
-       * operation type and parameters to the secure context
-       * and jump to the fast smc entry point in the secure
-       * payload. Entry into S-EL1 will take place upon exit
-       * from this function.
-       */
-      assert(&tsp_ctx->cpu_ctx == cm_get_context(SECURE));
-
-      /* Set appropriate entry for SMC.
-       * We expect the TSP to manage the PSTATE.I and PSTATE.F
-       * flags as appropriate.
-       */
-      if (GET_SMC_TYPE(smc_fid) == SMC_TYPE_FAST) {
-        cm_set_elr_el3(SECURE, (uint64_t)
-                       &tsp_vectors->fast_smc_entry);
-      } else {
-        set_yield_smc_active_flag(tsp_ctx->state);
-        cm_set_elr_el3(SECURE, (uint64_t)
-                       &tsp_vectors->yield_smc_entry);
-#if TSP_NS_INTR_ASYNC_PREEMPT
-        /*
-         * Enable the routing of NS interrupts to EL3
-         * during processing of a Yielding SMC Call on
-         * this core.
-         */
-        enable_intr_rm_local(INTR_TYPE_NS, SECURE);
-#endif
-
-#if EL3_EXCEPTION_HANDLING
-        /*
-         * With EL3 exception handling, while an SMC is
-         * being processed, Non-secure interrupts can't
-         * preempt Secure execution. However, for
-         * yielding SMCs, we want preemption to happen;
-         * so explicitly allow NS preemption in this
-         * case, and supply the preemption return code
-         * for TSP.
-         */
-        ehf_allow_ns_preemption(TSP_PREEMPTED);
-#endif
-      }
-
-      cm_el1_sysregs_context_restore(SECURE);
-      cm_set_next_eret_context(SECURE);
-      SMC_RET3(&tsp_ctx->cpu_ctx, smc_fid, x1, x2);
-    } else {
-      /*
-       * This is the result from the secure client of an
-       * earlier request. The results are in x1-x3. Copy it
-       * into the non-secure context, save the secure state
-       * and return to the non-secure state.
-       */
-      assert(handle == cm_get_context(SECURE));
-      cm_el1_sysregs_context_save(SECURE);
-
-      /* Get a reference to the non-secure context */
-      ns_cpu_context = cm_get_context(NON_SECURE);
-      assert(ns_cpu_context);
-
-      /* Restore non-secure state */
-      cm_el1_sysregs_context_restore(NON_SECURE);
-      cm_set_next_eret_context(NON_SECURE);
-      if (GET_SMC_TYPE(smc_fid) == SMC_TYPE_YIELD) {
-        clr_yield_smc_active_flag(tsp_ctx->state);
-#if TSP_NS_INTR_ASYNC_PREEMPT
-        /*
-         * Disable the routing of NS interrupts to EL3
-         * after processing of a Yielding SMC Call on
-         * this core is finished.
-         */
-        disable_intr_rm_local(INTR_TYPE_NS, SECURE);
-#endif
-      }
-
-      SMC_RET3(ns_cpu_context, x1, x2, x3);
-    }
-    assert(0); /* Unreachable */
 
     /*
      * Request from the non-secure world to abort a preempted Yielding SMC
      * Call.
      */
-  case TSP_FID_ABORT:
-    /* ABORT should only be invoked by normal world */
-    if (!ns) {
-      assert(0);
-      break;
-    }
-
-    assert(handle == cm_get_context(NON_SECURE));
-    cm_el1_sysregs_context_save(NON_SECURE);
-
-    /* Abort the preempted SMC request */
-    if (!tspd_abort_preempted_smc(tsp_ctx)) {
-      /*
-       * If there was no preempted SMC to abort, return
-       * SMC_UNK.
-       *
-       * Restoring the NON_SECURE context is not necessary as
-       * the synchronous entry did not take place if the
-       * return code of tspd_abort_preempted_smc is zero.
-       */
-      cm_set_next_eret_context(NON_SECURE);
-      break;
-    }
-
-    cm_el1_sysregs_context_restore(NON_SECURE);
-    cm_set_next_eret_context(NON_SECURE);
-    SMC_RET1(handle, SMC_OK);
-
-    /*
-     * Request from non secure world to resume the preempted
-     * Yielding SMC Call.
-     */
-  case TSP_FID_RESUME:
-    /* RESUME should be invoked only by normal world */
-    if (!ns) {
-      assert(0);
-      break;
-    }
-
-    /*
-     * This is a resume request from the non-secure client.
-     * save the non-secure state and send the request to
-     * the secure payload.
-     */
-    assert(handle == cm_get_context(NON_SECURE));
-
-    /* Check if we are already preempted before resume */
-    if (!get_yield_smc_active_flag(tsp_ctx->state))
-      SMC_RET1(handle, SMC_UNK);
-
-    cm_el1_sysregs_context_save(NON_SECURE);
-
-    /*
-     * We are done stashing the non-secure context. Ask the
-     * secure payload to do the work now.
-     */
-#if TSP_NS_INTR_ASYNC_PREEMPT
-    /*
-     * Enable the routing of NS interrupts to EL3 during resumption
-     * of a Yielding SMC Call on this core.
-     */
-    enable_intr_rm_local(INTR_TYPE_NS, SECURE);
-#endif
-
-#if EL3_EXCEPTION_HANDLING
-    /*
-     * Allow the resumed yielding SMC processing to be preempted by
-     * Non-secure interrupts. Also, supply the preemption return
-     * code for TSP.
-     */
-    ehf_allow_ns_preemption(TSP_PREEMPTED);
-#endif
-
-    /* We just need to return to the preempted point in
-     * TSP and the execution will resume as normal.
-     */
-    cm_el1_sysregs_context_restore(SECURE);
-    cm_set_next_eret_context(SECURE);
-    SMC_RET0(&tsp_ctx->cpu_ctx);
-
-    /*
-     * This is a request from the secure payload for more arguments
-     * for an ongoing arithmetic operation requested by the
-     * non-secure world. Simply return the arguments from the non-
-     * secure client in the original call.
-     */
-  case TSP_GET_ARGS:
-    if (ns)
-      SMC_RET1(handle, SMC_UNK);
-
-    get_tsp_args(tsp_ctx, x1, x2);
-    SMC_RET2(handle, x1, x2);
 
   case TOS_CALL_COUNT:
     /*
@@ -643,7 +403,7 @@ static uintptr_t tspd_smc_handler(uint32_t smc_fid,
     break;
   }
 
-  SMC_RET1(handle, SMC_UNK);
+  panic();
 }
 
 /* Define a SPD runtime service descriptor for fast SMC calls */

@@ -186,14 +186,6 @@ typedef struct tsp_context {
 	uint64_t c_rt_ctx;
 	cpu_context_t cpu_ctx;
 	uint64_t saved_tsp_args[TSP_NUM_ARGS];
-#if TSP_NS_INTR_ASYNC_PREEMPT
-	sp_ctx_regs_t sp_ctx;
-	bool preempted_by_sel1_intr;
-#endif
-#if TSPD_ROUTE_FIQ_TO_EL3
-	sp_ctx_regs_t sp_ctx_2;
-#endif
-
 } tsp_context_t;
 
 /* Helper macros to store and retrieve tsp args from tsp_context */
@@ -209,11 +201,6 @@ typedef struct tsp_context {
 
 /* TSPD power management handlers */
 extern const spd_pm_ops_t tspd_pm;
-
-/*******************************************************************************
- * Forward declarations
- ******************************************************************************/
-typedef struct tsp_vectors tsp_vectors_t;
 
 /*******************************************************************************
  * Function & Data prototypes
