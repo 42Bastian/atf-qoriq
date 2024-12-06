@@ -91,7 +91,8 @@ int32_t tsp_common_int_handler(void)
 	id = plat_ic_get_pending_interrupt_id();
 
 	/* TSP can only handle the secure physical timer interrupt */
-	if (id != TSP_IRQ_SEC_PHY_TIMER)
+//->	if (id != TSP_IRQ_SEC_PHY_TIMER)
+        if (id != BL32_IRQ_SEC_PHY_TIMER)
 		return tsp_handle_preemption();
 
 	/*

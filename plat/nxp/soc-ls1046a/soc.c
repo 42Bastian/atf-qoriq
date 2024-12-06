@@ -355,7 +355,7 @@ void soc_platform_setup(void)
 			target_mask_array);
 
 	plat_ls_gic_init();
-	enable_init_timer();
+//->	enable_init_timer();
 }
 
 /* This function initializes the soc from the BL31 module */
@@ -363,9 +363,9 @@ void soc_init(void)
 {
 	 /* low-level init of the soc */
 	soc_init_lowlevel();
-	_init_global_data();
+//->	_init_global_data();
 	soc_init_percpu();
-	_initialize_psci();
+//->	_initialize_psci();
 
 	/*
 	 * Initialize the interconnect during cold boot.

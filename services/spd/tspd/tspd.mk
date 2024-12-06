@@ -34,7 +34,7 @@ NEED_BL32		:=	yes
 
 # Flag used to enable routing of non-secure interrupts to EL3 when they are
 # generated while the code is executing in S-EL1/0.
-TSP_NS_INTR_ASYNC_PREEMPT	:=	0
+TSP_NS_INTR_ASYNC_PREEMPT	:=	1
 
 ifeq ($(EL3_EXCEPTION_HANDLING),1)
 ifeq ($(TSP_NS_INTR_ASYNC_PREEMPT),0)

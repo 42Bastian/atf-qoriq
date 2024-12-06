@@ -190,6 +190,10 @@ typedef struct tsp_context {
 	sp_ctx_regs_t sp_ctx;
 	bool preempted_by_sel1_intr;
 #endif
+#if TSPD_ROUTE_FIQ_TO_EL3
+	sp_ctx_regs_t sp_ctx_2;
+#endif
+
 } tsp_context_t;
 
 /* Helper macros to store and retrieve tsp args from tsp_context */

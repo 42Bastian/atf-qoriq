@@ -319,6 +319,7 @@ ifneq (${DEBUG}, 0)
         LOG_LEVEL	:=	40
 else
         BUILD_TYPE	:=	release
+        TF_CFLAGS	+= 	-g
         # Use LOG_LEVEL_NOTICE by default for release builds
         LOG_LEVEL	:=	20
 endif
@@ -423,7 +424,7 @@ TF_LDFLAGS		+=	$(TF_LDFLAGS_$(ARCH))
 # LD = gcc (used when GCC LTO is enabled)
 else ifneq ($(findstring gcc,$(notdir $(LD))),)
 # Pass ld options with Wl or Xlinker switches
-TF_LDFLAGS		+=	-O1
+TF_LDFLAGS		+=	-O1 -g
 TF_LDFLAGS		+=	-Wl,--gc-sections
 ifeq ($(ENABLE_LTO),1)
 	ifeq (${ARCH},aarch64)

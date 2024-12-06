@@ -29,6 +29,9 @@
  */
 #define TSP_HANDLED_S_EL1_INTR		0xf2000006
 
+#define TSP_S_IDLE		0xf2000010
+#define TSP_NS_IDLE		0xf2000011
+
 /* SMC function ID that TSP uses to request service from secure monitor */
 #define TSP_GET_ARGS		0xf2001000
 

@@ -31,4 +31,9 @@
 					NXP_OCRAM_SIZE, \
 					MT_DEVICE | MT_RW | MT_SECURE)
 
+
+#define LS_MAP_BL32_SEC_MEM 		MAP_REGION_FLAT(0xfc000000, \
+					NXP_OCRAM_SIZE, \
+					MT_DEVICE | MT_RW | MT_SECURE)
+
 #endif /* MMU_MAP_DEF_H */
