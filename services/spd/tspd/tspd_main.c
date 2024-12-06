@@ -272,8 +272,12 @@ static uintptr_t tspd_smc_handler(uint32_t smc_fid,
     } else {
     system_idle:
       u_register_t isr;
+      __asm__ __volatile__(
+        " mrs %0,SCR_EL3\n"
+        " orr %0,%0,#6\n"
+        " msr SCR_EL3,%0":"=r"(isr));
       do{
-//->        __asm__ __volatile__ (" wfi");
+        __asm__ __volatile__ (" wfi");
         __asm__ __volatile__ (" mrs %0,ISR_EL1":"=r"(isr));
         if ( isr & 0x40 ){
 //->          NOTICE("FIQ\n");
